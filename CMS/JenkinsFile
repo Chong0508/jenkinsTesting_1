@@ -1,78 +1,109 @@
-// Jenkins Declarative Pipeline for CMS Spring Boot Application
-
 pipeline {
-    // Agent is set to 'any' to run on the main Jenkins executor.
+
     agent any
 
+    environment {
+        // Jenkins workspace directory
+        WORKSPACE_DIR = "${env.WORKSPACE}"
+        APP_DIR = "${env.WORKSPACE}/CMS"    // your Spring Boot project folder
+    }
+
     stages {
-        // Stage 1: Initial Docker Build (Runs inside Maven container)
+
+        stage('Verify Project Structure') {
+            steps {
+                echo "Checking if CMS folder contains pom.xml..."
+
+                sh '''
+                    if [ ! -f "${APP_DIR}/pom.xml" ]; then
+                        echo "ERROR: pom.xml not found in CMS folder!"
+                        echo "Expected: ${APP_DIR}/pom.xml"
+                        exit 1
+                    fi
+                '''
+            }
+        }
+
         stage('Initial Docker Build') {
             steps {
-                echo '1. Running clean install inside a dedicated Maven container...'
-                
-                // CRITICAL FIX: Set -w to /app/CMS where pom.xml is located.
-                // Running as root (-u 0) bypasses final Docker socket permission conflicts.
-                sh 'docker run -u 0 --rm -v $(pwd):/app -w /app/CMS maven:3-jdk-11 mvn clean install -DskipTests=true'
+                echo '1. Running clean install inside Maven Docker container...'
+
+                sh """
+                    docker run -u 0 --rm \
+                        -v ${APP_DIR}:/app \
+                        -w /app \
+                        maven:3-jdk-11 mvn clean install -DskipTests=true
+                """
             }
         }
 
-        // Stage 2: Build the Java application and run Unit Tests (Runs on Jenkins agent)
         stage('Build & Unit Test') {
             steps {
-                // CRITICAL FIX: Change directory to CMS before running Maven
-                dir('CMS') {
-                    echo '2. Compiling source code and running all unit tests (mvn test)...'
-                    sh 'mvn clean install -DskipTests=false -B'
-                }
+                echo '2. Compiling source code and running unit tests...'
+
+                sh """
+                    cd ${APP_DIR}
+                    mvn clean test -B
+                """
             }
         }
 
-        // Stage 3: Deploy / Start Services for Integration Tests (Docker Compose)
         stage('Setup Integration Environment') {
             steps {
-                // CRITICAL FIX: Change directory to CMS before running docker-compose
-                dir('CMS') {
-                    echo '3. Starting MySQL and Spring Boot API containers for integration testing...'
-                    sh '''
-                        docker-compose up -d --build cms-api mysql-db
-                        echo "Waiting 30 seconds for services to become available..."
-                        sleep 30 
-                    '''
-                }
+                echo '3. Starting integration environment (docker-compose)...'
+
+                sh """
+                    if [ ! -f docker-compose.yml ] && [ ! -f CMS/docker-compose.yml ]; then
+                        echo 'WARNING: docker-compose.yml not found. Skipping environment setup.'
+                        exit 0
+                    fi
+                """
+
+                sh """
+                    docker-compose -f CMS/docker-compose.yml up -d --build
+                    echo 'Waiting 30 seconds for DB & API to start...'
+                    sleep 30
+                """
             }
         }
 
-        // Stage 4: Run Full Integration/API Tests
         stage('Integration Tests') {
-            when { expression { return currentBuild.result == 'SUCCESS' } }
+            when {
+                expression { currentBuild.result == null || currentBuild.result == 'SUCCESS' }
+            }
             steps {
-                // CRITICAL FIX: Change directory to CMS before running Maven
-                dir('CMS') {
-                    echo '4. Running API/Integration Tests (using Maven Failsafe)...'
-                    sh 'mvn failsafe:integration-test -DskipTests=false -B' 
-                }
+                echo '4. Running integration tests...'
+
+                sh """
+                    cd ${APP_DIR}
+                    mvn failsafe:integration-test failsafe:verify -B
+                """
             }
         }
-    } // End of stages
+    }
 
-    // Post-Build Actions: Cleanup and Reporting
     post {
+
         always {
-            echo '5. Cleaning up Docker containers and publishing reports...'
-            
-            // CRITICAL FIX: Change directory to CMS before running docker-compose down.
-            // || true ensures the step doesn't fail the pipeline if containers weren't started.
-            dir('CMS') {
-                sh 'docker-compose down || true' 
-            }
-            
-            // Publish test reports to Jenkins UI (path remains relative to workspace)
-            junit '**/target/surefire-reports/TEST-*.xml'
-            
-            // Clean workspace to free up disk space
+            echo '5. Cleanup & Test Reporting...'
+
+            // Try shutting environment down (if docker-compose exists)
+            sh 'docker-compose -f CMS/docker-compose.yml down || true'
+
+            // Publish unit test reports safely
+            junit 'CMS/target/surefire-reports/*.xml'
+            junit 'CMS/target/failsafe-reports/*.xml'
+
             cleanWs()
         }
-        success { echo 'Pipeline Success! Build and Tests passed.' }
-        failure { echo 'Pipeline FAILED. Check console output and Test Results for errors.' }
-    } // End of post
-} // End of pipeline
+
+        success {
+            echo 'Pipeline SUCCESS!'
+        }
+
+        failure {
+            echo 'Pipeline FAILED — Please check logs.'
+        }
+    }
+}
+
