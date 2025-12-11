@@ -1,8 +1,11 @@
 pipeline {
     agent any
 
-    stages {
+    environment {
+        PROJECT_DIR = "CMS"
+    }
 
+    stages {
         stage('Checkout') {
             steps {
                 checkout scm
@@ -13,57 +16,56 @@ pipeline {
 
         stage('Verify Project Structure') {
             steps {
-                echo "Checking for pom.xml in project root..."
-                sh "[ -f pom.xml ]"
+                echo "Checking CMS/pom.xml..."
+                sh "[ -f ${PROJECT_DIR}/pom.xml ]"
             }
         }
 
         stage('Initial Docker Build') {
             steps {
                 echo "Running Maven inside Docker..."
-                sh '''
+                sh """
                     docker run -u 0 --rm \
-                        -v $(pwd):/app \
+                        -v \$(pwd)/${PROJECT_DIR}:/app \
                         -w /app \
                         maven:3-jdk-11 mvn clean install -DskipTests=true
-                '''
+                """
             }
         }
 
         stage('Build & Unit Test') {
             steps {
-                echo "Running Maven on Jenkins host..."
-                sh "mvn clean install -DskipTests=false -B"
+                echo "Running Maven (unit tests)..."
+                dir("${PROJECT_DIR}") {
+                    sh "mvn clean test -B"
+                }
             }
             post {
                 always {
-                    junit "target/surefire-reports/*.xml"
+                    junit "${PROJECT_DIR}/target/surefire-reports/*.xml"
                 }
             }
         }
 
         stage('Setup Integration Environment') {
             steps {
-                echo "Starting docker-compose services..."
-                sh '''
-                    docker-compose up -d --build
-                    echo "Waiting for services..."
+                echo "Starting docker-compose..."
+                sh """
+                    docker-compose -f ${PROJECT_DIR}/docker-compose.yml up -d --build
                     sleep 20
-                '''
+                """
             }
         }
 
         stage('Integration Tests') {
-            when {
-                expression { currentBuild.result == null || currentBuild.result == 'SUCCESS' }
-            }
             steps {
-                echo "Running integration tests..."
-                sh "mvn failsafe:integration-test -DskipTests=false -B"
+                dir("${PROJECT_DIR}") {
+                    sh "mvn failsafe:integration-test -B"
+                }
             }
             post {
                 always {
-                    junit "target/failsafe-reports/*.xml"
+                    junit "${PROJECT_DIR}/target/failsafe-reports/*.xml"
                 }
             }
         }
@@ -72,14 +74,8 @@ pipeline {
     post {
         always {
             echo "Cleaning environment..."
-            sh "docker-compose down || true"
+            sh "docker-compose -f ${PROJECT_DIR}/docker-compose.yml down || true"
             cleanWs()
-        }
-        success {
-            echo "PIPELINE SUCCESS!"
-        }
-        failure {
-            echo "PIPELINE FAILED!"
         }
     }
 }
