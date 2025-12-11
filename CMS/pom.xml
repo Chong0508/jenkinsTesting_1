@@ -27,7 +27,7 @@
 		<url/>
 	</scm>
 	<properties>
-		<java.version>20</java.version>
+    <java.version>20</java.version>
 	</properties>
 	<dependencies>
 		<dependency>
@@ -58,12 +58,25 @@
 	</dependencies>
 
 	<build>
-		<plugins>
-			<plugin>
-				<groupId>org.springframework.boot</groupId>
-				<artifactId>spring-boot-maven-plugin</artifactId>
-			</plugin>
-		</plugins>
-	</build>
+    <plugins>
+        <!-- Spring Boot plugin -->
+        <plugin>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-maven-plugin</artifactId>
+        </plugin>
+
+        <!-- Compiler plugin for Java 20 -->
+        <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-compiler-plugin</artifactId>
+            <version>3.14.1</version>
+            <configuration>
+                <source>${java.version}</source>
+                <target>${java.version}</target>
+                <release>${java.version}</release>
+            </configuration>
+        </plugin>
+    </plugins>
+</build>
 
 </project>
