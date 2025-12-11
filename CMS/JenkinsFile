@@ -2,24 +2,18 @@ pipeline {
     agent any
 
     environment {
-        MAVEN_OPTS = "-Dmaven.repo.local=/var/jenkins_home/.m2/repository"
+        DOCKER_COMPOSE = "docker-compose -f CMS/docker-compose.yml"
     }
 
     stages {
-
-        stage('Checkout SCM') {
+        stage('Checkout') {
             steps {
-                checkout([$class: 'GitSCM',
-                    branches: [[name: '*/main']],
-                    userRemoteConfigs: [[
-                        url: 'https://github.com/Chong0508/jenkinsTesting_1.git',
-                        credentialsId: 'github-jenkinsTesting'
-                    ]]
-                ])
+                git url: 'https://github.com/Chong0508/jenkinsTesting_1.git',
+                    credentialsId: 'github-jenkinsTesting'
             }
         }
 
-        stage('Verify Project Structure') {
+        stage('Verify Project') {
             steps {
                 echo "Checking CMS/pom.xml..."
                 sh '[ -f CMS/pom.xml ] || exit 1'
@@ -27,26 +21,29 @@ pipeline {
             }
         }
 
-        stage('Start Docker Services') {
+        stage('Build & Unit Test') {
             steps {
-                echo "Starting MySQL and API containers..."
-                sh 'docker-compose -f CMS/docker-compose.yml up -d --build'
-                echo "Waiting for MySQL to be ready..."
-                sh '''
-                until docker exec $(docker ps -qf "name=mysql-db") mysql -ucms_user -pcms_pass cms_db -e "SELECT 1;" &> /dev/null
-                do
-                    echo "Waiting for MySQL..."
-                    sleep 3
-                done
-                '''
+                echo "Building project in Maven Docker container..."
+                dir('CMS') {
+                    sh 'docker run --rm -v $PWD:/app -w /app maven:3-jdk-11 ./mvnw clean install -DskipTests'
+                }
             }
         }
 
-        stage('Build & Unit Test') {
+        stage('Start Integration Environment') {
             steps {
+                echo "Starting MySQL and API..."
+                sh "${DOCKER_COMPOSE} up -d --build"
+                echo "Waiting for MySQL to be healthy..."
+                sh 'sleep 20'  // adjust if necessary
+            }
+        }
+
+        stage('Integration Tests') {
+            steps {
+                echo "Running Integration Tests..."
                 dir('CMS') {
-                    echo "Running Maven build and tests..."
-                    sh './mvnw clean install'
+                    sh './mvnw verify'
                 }
             }
         }
@@ -55,7 +52,7 @@ pipeline {
     post {
         always {
             echo "Cleaning up Docker environment..."
-            sh 'docker-compose -f CMS/docker-compose.yml down'
+            sh "${DOCKER_COMPOSE} down"
             cleanWs()
         }
     }
