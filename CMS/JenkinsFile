@@ -2,12 +2,13 @@
 
 pipeline {
     // 1. Environment: Use a Maven image to ensure a consistent build environment.
-    agent {
-        docker {
-            // Using a standard Java/Maven image to run mvn commands
-            image 'maven:3.9.6-eclipse-temurin-20'
-            // Cache Maven dependencies to speed up subsequent builds
-            args '-v $HOME/.m2:/root/.m2'
+    agent any // Use any available Jenkins node/executor
+    stages {
+        stage('Build') {
+            steps {
+                // Now you must use the `sh` step to run your build inside a container manually
+                sh 'docker run --rm -v $(pwd):/app -w /app maven:3-jdk-11 mvn clean install'
+            }
         }
     }
     
