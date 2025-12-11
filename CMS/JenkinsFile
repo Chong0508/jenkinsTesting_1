@@ -10,7 +10,6 @@ pipeline {
                 sh 'docker run --rm -v $(pwd):/app -w /app maven:3-jdk-11 mvn clean install'
             }
         }
-    }
     
     stages {
         
@@ -49,6 +48,7 @@ pipeline {
                 sh 'mvn failsafe:integration-test -DskipTests=false -B' 
             }
         }
+    }
     }
     
     // Post-Build Actions: Cleanup and Reporting
