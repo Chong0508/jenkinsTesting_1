@@ -1,89 +1,87 @@
 pipeline {
     agent any
-    
+
     environment {
-        DOCKER_COMPOSE_FILE = 'CMS/docker-compose.yml'
+        // Defines the subdirectory containing the pom.xml and project files.
+        PROJECT_DIR = "CMS" 
     }
-    
+
     stages {
         stage('Checkout') {
             steps {
                 checkout scm
-                echo 'Repository structure:'
-                sh 'ls -R CMS'
+                echo "Repository structure:"
+                sh "ls -R ."
             }
         }
-        
+
         stage('Verify Project Structure') {
             steps {
-                echo 'Checking CMS/pom.xml...'
-                sh '[ -f CMS/pom.xml ]'
+                echo "Checking ${PROJECT_DIR}/pom.xml..."
+                sh "[ -f ${PROJECT_DIR}/pom.xml ]" 
+                
+                // FIX 1: Grant execute permission to the mvnw script (fixes 'Permission denied')
+                sh "chmod +x ${PROJECT_DIR}/mvnw" 
             }
         }
-        
-        stage('Build & Unit Test') {
+
+        // This stage combines the build, package, and unit test execution into a single robust step.
+        stage('Build, Unit Test & Package') {
             steps {
-                dir('CMS') {
-                    echo 'Setting Maven Wrapper executable...'
-                    sh 'chmod +x mvnw'
-                    
-                    echo 'Building project with Maven Wrapper...'
-                    sh './mvnw clean install -DskipTests=true'
-                    
-                    echo 'Running unit tests (excluding integration tests)...'
-                    sh './mvnw test -Dtest=*ControllerTest'
+                echo "1. Running full Maven build (clean install) with H2 in-memory database..."
+                
+                // CRITICAL FIX: Overrides production database URL for unit tests
+                dir("${PROJECT_DIR}") {
+                    // The command runs the full install and executes unit tests (as DskipTests=false is implicit in 'test' phase)
+                    sh "./mvnw clean install -B -Dspring.datasource.url=jdbc:h2:mem:testdb"
                 }
             }
             post {
                 always {
-                    junit 'CMS/target/surefire-reports/*.xml'
+                    // Publish test reports from the project directory.
+                    junit "${PROJECT_DIR}/target/surefire-reports/*.xml"
                 }
             }
         }
-        
+
         stage('Setup Integration Environment') {
             steps {
-                echo 'Starting MySQL database...'
-                sh "docker-compose -f ${DOCKER_COMPOSE_FILE} up -d mysql"
+                echo "2. Starting Integration environment (docker-compose)..."
                 
-                echo 'Waiting for MySQL to be ready...'
-                sh '''
-                    timeout 60 sh -c 'until docker-compose -f CMS/docker-compose.yml exec -T mysql mysqladmin ping -h localhost --silent; do
-                        echo "Waiting for MySQL..."
-                        sleep 2
-                    done'
-                '''
-                
-                echo 'MySQL is ready!'
+                dir("${PROJECT_DIR}") {
+                    // CRITICAL FIX: Starting the correct service names (mysql-db cms-api)
+                    sh """
+                        docker-compose up -d mysql-db cms-api --build
+                        echo "Waiting 20 seconds for services to become available..."
+                        sleep 20
+                    """
+                }
             }
         }
-        
+
         stage('Integration Tests') {
             steps {
-                dir('CMS') {
-                    echo 'Running integration tests...'
-                    sh './mvnw test -Dtest=*ApplicationTests'
+                echo "3. Running Maven Failsafe (integration tests) against live DB..."
+                // Runs integration tests against the live database started in the previous stage.
+                dir("${PROJECT_DIR}") {
+                    sh "mvn failsafe:integration-test -B"
                 }
             }
             post {
                 always {
-                    junit 'CMS/target/surefire-reports/*.xml'
+                    junit "${PROJECT_DIR}/target/failsafe-reports/*.xml"
                 }
             }
         }
-    }
-    
+    } // End of stages
+
+    // Post-Build Actions: Cleanup and Reporting
     post {
         always {
-            echo 'Cleaning up environment...'
-            sh "docker-compose -f ${DOCKER_COMPOSE_FILE} down || true"
+            echo "4. Cleaning environment..."
+            // Use the -f flag with the correct path, and || true for robust cleanup.
+            sh "docker-compose -f ${PROJECT_DIR}/docker-compose.yml down || true"
             cleanWs()
-        }
-        success {
-            echo 'Pipeline completed successfully!'
-        }
-        failure {
-            echo 'Pipeline failed. Check logs for details.'
         }
     }
 }
