@@ -13,28 +13,34 @@ pipeline {
             }
         }
 
-        stage('Setup Integration Environment') {
+        stage('Verify Project Structure') {
             steps {
-                echo "Starting Docker Compose environment..."
-                sh """
-                    docker-compose -f ${PROJECT_DIR}/docker-compose.yml up -d --build
-                    echo "Waiting 20 seconds for MySQL to be ready..."
-                    sleep 20
-                """
+                sh "[ -f ${PROJECT_DIR}/pom.xml ]"
             }
         }
 
         stage('Build & Unit Test') {
             steps {
                 dir("${PROJECT_DIR}") {
-                    sh "chmod +x mvnw"
-                    sh "./mvnw clean install -DskipTests=false -B"
+                    sh "./mvnw clean install -DskipTests=true"
+                    sh "./mvnw test -B"
                 }
             }
             post {
                 always {
                     junit "${PROJECT_DIR}/target/surefire-reports/*.xml"
                 }
+            }
+        }
+
+        stage('Setup Integration Environment') {
+            steps {
+                echo "Starting Docker Compose environment..."
+                sh """
+                    docker-compose -f ${PROJECT_DIR}/docker-compose.yml up -d --build
+                    echo "Waiting 20 seconds for services to become available..."
+                    sleep 20
+                """
             }
         }
 
