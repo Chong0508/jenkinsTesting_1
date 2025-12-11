@@ -1,21 +1,14 @@
 pipeline {
-    agent {
-        docker {
-            image 'maven:3.9.5-eclipse-temurin-17'
-            args '-v $HOME/.m2:/root/.m2' // Mount Maven cache
-        }
-    }
+    agent any  // run on any available node
 
     environment {
-        MAVEN_OPTS = "-Dmaven.repo.local=/root/.m2/repository"
+        MAVEN_OPTS = "-Dmaven.repo.local=$HOME/.m2/repository"
         PROJECT_NAME = "CMS-Backend-Pipeline"
     }
 
     options {
-        // Keep build logs for 30 days, max 50 builds
         buildDiscarder(logRotator(daysToKeepStr: '30', numToKeepStr: '50'))
-        timestamps()  // add timestamps in console log
-        ansiColor('xterm')  // colorize console logs
+        timestamps()  // keep timestamps in console log
     }
 
     stages {
@@ -28,7 +21,7 @@ pipeline {
 
         stage('Pre-build Dependencies') {
             steps {
-                echo "Downloading Maven dependencies (offline mode)..."
+                echo "Downloading Maven dependencies..."
                 sh 'mvn -B dependency:go-offline'
             }
         }
@@ -78,7 +71,7 @@ pipeline {
             echo "❌ Build or tests failed!"
         }
         always {
-            cleanWs()  // clean workspace after build
+            cleanWs()
         }
     }
 }
