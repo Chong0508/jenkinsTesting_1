@@ -45,14 +45,28 @@ pipeline {
         stage('Build & Unit Test') {
     steps {
         dir('CMS') {
-            echo "Running Maven build and tests with Java 20..."
-            // Use Maven Docker image with JDK 20
+            echo "Verifying CMS directory structure..."
             sh '''
-            docker run --rm -v $PWD:/app -w /app maven:3.9.3-eclipse-temurin-20 mvn clean install
+            echo "Current directory: $(pwd)"
+            ls -la
+            if [ ! -f pom.xml ]; then
+                echo "ERROR: pom.xml not found in $(pwd)"
+                exit 1
+            fi
+            '''
+
+            echo "Running Maven build and tests with Java 20..."
+            sh '''
+            docker run --rm \
+                -v $PWD:/app \
+                -w /app \
+                maven:3.9.3-eclipse-temurin-20 \
+                mvn clean install
             '''
         }
     }
 }
+
 
     }
 
