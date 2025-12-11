@@ -1,64 +1,63 @@
 // Jenkins Declarative Pipeline for CMS Spring Boot Application
 
 pipeline {
-    // 1. Environment: Use a Maven image to ensure a consistent build environment.
-    agent any // Use any available Jenkins node/executor
+    // 1. Environment: Use any available Jenkins node/executor
+    agent any
+
     stages {
-        stage('Build') {
+        // Stage 1: Manual Docker Run (from your previous attempt)
+        // NOTE: This runs the build command on the Jenkins host, but inside a temporary container.
+        stage('Initial Docker Build') {
             steps {
-                // Now you must use the `sh` step to run your build inside a container manually
-                sh 'docker run --rm -v $(pwd):/app -w /app maven:3-jdk-11 mvn clean install'
+                // The 'sh' step must be used to run your build inside a container manually
+                sh 'docker run --rm -v $(pwd):/app -w /app maven:3-jdk-11 mvn clean install -DskipTests=true'
             }
         }
-    
-    stages {
-        
-        // Stage 1: Build the Java application and run Unit Tests (including your new controller test)
+
+        // Stage 2: Build the Java application and run Unit Tests
         stage('Build & Unit Test') {
             steps {
                 echo '1. Compiling source code and running all unit tests (mvn test)...'
                 // 'clean install' packages the .jar, and '-DskipTests=false' ensures tests run
-                sh 'mvn clean install -DskipTests=false -B' 
+                // NOTE: This assumes the Jenkins executor itself has Maven installed, 
+                //       or the 'agent' is configured for Maven.
+                sh 'mvn clean install -DskipTests=false -B'
             }
         }
-        
-        // Stage 2: Deploy / Start Services for Integration Tests (This uses Docker Compose)
+
+        // Stage 3: Deploy / Start Services for Integration Tests (Docker Compose)
         stage('Setup Integration Environment') {
             steps {
                 echo '2. Starting MySQL and Spring Boot API containers for integration testing...'
                 // Start the database (mysql-db) and API (cms-api) services in detached mode
-                // NOTE: This requires Jenkins to have access to Docker/docker-compose on the host machine.
-                script {
-                    sh 'docker-compose up -d --build cms-api mysql-db' //
-                    // Waiting for service availability (adjust sleep or use a proper health check script)
-                    sh 'sleep 30' 
-                }
+                sh 'docker-compose up -d --build cms-api mysql-db'
+                // Waiting for service availability
+                sh 'sleep 30' 
             }
         }
 
-        // Stage 3: Run Full Integration/API Tests
+        // Stage 4: Run Full Integration/API Tests
         stage('Integration Tests') {
             // Only proceed if the previous unit tests passed successfully
             when {
                 expression { return currentBuild.result == 'SUCCESS' }
             }
             steps {
-                echo '3. Running API/Integration Tests (assuming tests are configured to use Maven Failsafe)...'
-                // This command executes tests designed to hit the live API endpoints on localhost:8080
-                sh 'mvn failsafe:integration-test -DskipTests=false -B' 
+                echo '3. Running API/Integration Tests (using Maven Failsafe)...'
+                // Executes tests designed to hit the live API endpoints
+                sh 'mvn failsafe:integration-test -DskipTests=false -B'
             }
         }
-    }
-    }
-    
+    } // <-- CORRECT CLOSING BRACE for the main 'stages' block
+
     // Post-Build Actions: Cleanup and Reporting
     post {
         always {
             echo '4. Cleaning up Docker containers and publishing reports...'
-            // Stop and remove the containers launched in Stage 2
+            // Stop and remove the containers launched in Stage 3
             sh 'docker-compose down'
             
-            // Publish test reports to Jenkins UI (must match the Maven output directory)
+            // Publish test reports to Jenkins UI
             junit '**/target/surefire-reports/TEST-*.xml'
             
             // Clean workspace to free up disk space
