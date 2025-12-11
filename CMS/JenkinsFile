@@ -27,7 +27,7 @@ pipeline {
                 echo "Running Maven inside Docker (skip tests)..."
                 
                 // FINAL FIX: Mount the specific project subdirectory (${WORKSPACE}/CMS) to the container root (/app).
-                // This makes the pom.xml directly available at /app/pom.xml
+                // This makes the pom.xml directly available at /app/pom.xml, resolving the missing POM error.
                 sh """
                     docker run -u 0 --rm \\
                         -v ${WORKSPACE}/${PROJECT_DIR}:/app \\
