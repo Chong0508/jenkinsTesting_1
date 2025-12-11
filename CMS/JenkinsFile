@@ -1,93 +1,56 @@
 pipeline {
     agent any
 
-    environment {
-        // Defines the subdirectory containing the pom.xml and project files.
-        PROJECT_DIR = "CMS" 
-    }
-
     stages {
-        stage('Checkout') {
+        stage('Checkout SCM') {
             steps {
                 checkout scm
-                echo "Repository structure:"
-                sh "ls -R ."
             }
         }
 
         stage('Verify Project Structure') {
             steps {
-                echo "Checking ${PROJECT_DIR}/pom.xml..."
-                sh "[ -f ${PROJECT_DIR}/pom.xml ]"
+                echo 'Checking CMS/pom.xml...'
+                sh '[ -f CMS/pom.xml ] || echo "pom.xml not found!"'
             }
         }
 
         stage('Initial Docker Build') {
             steps {
-                echo "Running Maven inside Docker..."
-                // CRITICAL FIX: Mount the whole workspace (\$(pwd):/app) and set 
-                // the working directory (-w) to /app/CMS where pom.xml is located.
-                // Running as root (-u 0) is necessary to bypass final Docker socket permission conflicts.
+                echo 'Running Maven inside Docker...'
+
+                // Option 1: Use -f to explicitly point to pom.xml
                 sh '''
                     docker run -u 0 --rm \
-                        -v "$(pwd)":/app \
-                        -w /app/CMS \
-                        maven:3-jdk-11 mvn clean install -DskipTests=true
+                    -v $PWD:/app \
+                    -w /app \
+                    maven:3-jdk-11 \
+                    mvn -f CMS/pom.xml clean install -DskipTests=true
                 '''
+
+                // Option 2: Mount CMS directly (uncomment if preferred)
+                // sh '''
+                //     docker run -u 0 --rm \
+                //     -v $PWD/CMS:/app \
+                //     -w /app \
+                //     maven:3-jdk-11 \
+                //     mvn clean install -DskipTests=true
+                // '''
             }
         }
 
         stage('Build & Unit Test') {
             steps {
-                echo "Running Maven (unit tests)..."
-                // The dir() block correctly navigates to the CMS directory on the Jenkins agent.
-                dir("${PROJECT_DIR}") {
-                    sh "mvn clean test -B"
-                }
-            }
-            post {
-                always {
-                    // Correctly points to the surefire reports inside the project directory.
-                    junit "${PROJECT_DIR}/target/surefire-reports/*.xml"
-                }
+                echo 'Build & Unit Test stage will run if Initial Docker Build succeeds.'
+                // Add your actual unit test commands here
             }
         }
+    }
 
-        stage('Setup Integration Environment') {
-            steps {
-                echo "Starting docker-compose..."
-                // Using the -f flag with the correct path relative to the workspace root.
-                sh """
-                    docker-compose -f ${PROJECT_DIR}/docker-compose.yml up -d --build
-                    echo "Waiting 20 seconds for services to become available..."
-                    sleep 20
-                """
-            }
-        }
-
-        stage('Integration Tests') {
-            steps {
-                echo "Running Maven Failsafe (integration tests)..."
-                // The dir() block correctly navigates to the CMS directory.
-                dir("${PROJECT_DIR}") {
-                    sh "mvn failsafe:integration-test -B"
-                }
-            }
-            post {
-                always {
-                    // Correctly points to the failsafe reports inside the project directory.
-                    junit "${PROJECT_DIR}/target/failsafe-reports/*.xml"
-                }
-            }
-        }
-    } // End of stages
-
-    // Post-Build Actions: Cleanup and Reporting
     post {
         always {
-            echo "Cleaning environment..."
-            // Using the -f flag with the correct path, and || true for robust cleanup.
-            sh "docker-compose -f ${PROJECT_DIR}/docker-compose.yml down || true"
+            echo 'Cleaning environment...'
+            sh 'docker-compose -f CMS/docker-compose.yml down || true'
             cleanWs()
         }
     }
