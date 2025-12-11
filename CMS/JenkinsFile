@@ -19,7 +19,8 @@ pipeline {
             steps {
                 echo "Checking ${PROJECT_DIR}/pom.xml..."
                 sh "[ -f ${PROJECT_DIR}/pom.xml ]" 
-                // FIX for "mvnw: Permission denied" - ensures the wrapper script is executable.
+                
+                // FIX 1: Grant execute permission to the mvnw script (fixes 'Permission denied')
                 sh "chmod +x ${PROJECT_DIR}/mvnw" 
             }
         }
@@ -27,7 +28,8 @@ pipeline {
         stage('Initial Docker Build') {
             steps {
                 echo "1. Running Maven inside Docker (skip tests)..."
-                // Mounts the CMS folder to the container's /app root for simplicity.
+                
+                // FIX 2: Mounts the CMS subdirectory directly to /app, resolving the 'Missing POM' error.
                 sh """
                     docker run -u 0 --rm \\
                         -v ${WORKSPACE}/${PROJECT_DIR}:/app \\
@@ -40,13 +42,15 @@ pipeline {
         stage('Build & Unit Test') {
             steps {
                 echo "2. Running Maven (unit tests) with H2 in-memory database..."
+                
+                // CRITICAL FIX: Overrides production database URL for unit tests
                 dir("${PROJECT_DIR}") {
-                    // FINAL FIX: Override production database URL for unit tests
                     sh "mvn clean test -B -Dspring.datasource.url=jdbc:h2:mem:testdb"
                 }
             }
             post {
                 always {
+                    // Publish test reports from the project directory.
                     junit "${PROJECT_DIR}/target/surefire-reports/*.xml"
                 }
             }
@@ -55,19 +59,21 @@ pipeline {
         stage('Setup Integration Environment') {
             steps {
                 echo "3. Starting Integration environment (docker-compose)..."
-                sh """
-                    // Assuming you have fixed the 3306 port conflict in docker-compose.yml 
-                    docker-compose -f ${PROJECT_DIR}/docker-compose.yml up -d --build
-                    echo "Waiting 20 seconds for services to become available..."
-                    sleep 20
-                """
+                // The port conflict (3306) must be fixed in docker-compose.yml outside this file.
+                dir("${PROJECT_DIR}") {
+                    sh """
+                        docker-compose up -d --build
+                        echo "Waiting 20 seconds for services to become available..."
+                        sleep 20
+                    """
+                }
             }
         }
 
         stage('Integration Tests') {
             steps {
                 echo "4. Running Maven Failsafe (integration tests) against live DB..."
-                // The dir() block correctly navigates to the CMS directory.
+                // Runs integration tests against the live database started in the previous stage.
                 dir("${PROJECT_DIR}") {
                     sh "mvn failsafe:integration-test -B"
                 }
@@ -84,6 +90,7 @@ pipeline {
     post {
         always {
             echo "5. Cleaning environment..."
+            // Use the -f flag with the correct path, and || true for robust cleanup.
             sh "docker-compose -f ${PROJECT_DIR}/docker-compose.yml down || true"
             cleanWs()
         }

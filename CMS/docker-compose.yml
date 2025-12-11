@@ -1,39 +1,34 @@
-version: "3.9"
+version: '3.8'
 
 services:
   mysql-db:
-    image: mysql:8.0
+    image: mysql:8.1
+    container_name: mysql-db
     environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: cms_db
-      MYSQL_USER: cms_user
-      MYSQL_PASSWORD: cms_pass
+      MYSQL_ROOT_PASSWORD: Conferease123!
+      MYSQL_DATABASE: cmsdb
+      MYSQL_USER: conferEase
+      MYSQL_PASSWORD: Conferease123!
     ports:
-      - "3307:3306"   # host access if needed
-    networks:
-      - cms-network
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
-      interval: 5s
-      retries: 10
-      timeout: 5s
+      - "3307:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./sql/cms_create.sql:/docker-entrypoint-initdb.d/cms_create.sql
+      - ./sql/cms_data.sql:/docker-entrypoint-initdb.d/cms_data.sql
 
   cms-api:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    build: .
+    container_name: cms-api
     depends_on:
-      mysql-db:
-        condition: service_healthy
-    networks:
-      - cms-network
+      - mysql-db
     environment:
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql-db:3306/cms_db
-      SPRING_DATASOURCE_USERNAME: cms_user
-      SPRING_DATASOURCE_PASSWORD: cms_pass
-    # do not expose ports to avoid conflicts in Jenkins
-    entrypoint: ["./wait-for-it.sh", "mysql-db:3306", "--", "java", "-jar", "/app.jar"]
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql-db:3306/cmsdb
+      SPRING_DATASOURCE_USERNAME: conferEase
+      SPRING_DATASOURCE_PASSWORD: Conferease123!
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+      SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT: org.hibernate.dialect.MySQL8Dialect
+    ports:
+      - "8080:8080"
 
-networks:
-  cms-network:
-    driver: bridge
+volumes:
+  mysql-data:
