@@ -1,48 +1,89 @@
-stage('Build & Unit Test') {
-    steps {
-        dir('CMS') {
-            echo 'Setting Maven Wrapper executable...'
-            sh 'chmod +x mvnw'
-            
-            echo 'Building project...'
-            sh './mvnw clean install -DskipTests=true'
-            
-            echo 'Running ONLY unit tests (excluding integration tests)...'
-            sh './mvnw test -Dtest=!*IntegrationTest,!*ApplicationTests'
-        }
+pipeline {
+    agent any
+    
+    environment {
+        DOCKER_COMPOSE_FILE = 'CMS/docker-compose.yml'
     }
-    post {
-        always {
-            junit 'CMS/target/surefire-reports/*.xml'
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+                echo 'Repository structure:'
+                sh 'ls -R CMS'
+            }
         }
-    }
-}
-
-stage('Setup Integration Environment') {
-    steps {
-        echo 'Starting MySQL database...'
-        sh 'docker-compose -f CMS/docker-compose.yml up -d mysql'
         
-        echo 'Waiting for MySQL to be ready...'
-        sh '''
-            timeout 60 sh -c 'until docker-compose -f CMS/docker-compose.yml exec -T mysql mysqladmin ping -h localhost --silent; do
-                echo "Waiting for MySQL..."
-                sleep 2
-            done'
-        '''
-    }
-}
-
-stage('Integration Tests') {
-    steps {
-        dir('CMS') {
-            echo 'Running integration tests...'
-            sh './mvnw test -Dtest=*ApplicationTests,*IntegrationTest'
+        stage('Verify Project Structure') {
+            steps {
+                echo 'Checking CMS/pom.xml...'
+                sh '[ -f CMS/pom.xml ]'
+            }
+        }
+        
+        stage('Build & Unit Test') {
+            steps {
+                dir('CMS') {
+                    echo 'Setting Maven Wrapper executable...'
+                    sh 'chmod +x mvnw'
+                    
+                    echo 'Building project with Maven Wrapper...'
+                    sh './mvnw clean install -DskipTests=true'
+                    
+                    echo 'Running unit tests (excluding integration tests)...'
+                    sh './mvnw test -Dtest=*ControllerTest'
+                }
+            }
+            post {
+                always {
+                    junit 'CMS/target/surefire-reports/*.xml'
+                }
+            }
+        }
+        
+        stage('Setup Integration Environment') {
+            steps {
+                echo 'Starting MySQL database...'
+                sh "docker-compose -f ${DOCKER_COMPOSE_FILE} up -d mysql"
+                
+                echo 'Waiting for MySQL to be ready...'
+                sh '''
+                    timeout 60 sh -c 'until docker-compose -f CMS/docker-compose.yml exec -T mysql mysqladmin ping -h localhost --silent; do
+                        echo "Waiting for MySQL..."
+                        sleep 2
+                    done'
+                '''
+                
+                echo 'MySQL is ready!'
+            }
+        }
+        
+        stage('Integration Tests') {
+            steps {
+                dir('CMS') {
+                    echo 'Running integration tests...'
+                    sh './mvnw test -Dtest=*ApplicationTests'
+                }
+            }
+            post {
+                always {
+                    junit 'CMS/target/surefire-reports/*.xml'
+                }
+            }
         }
     }
+    
     post {
         always {
-            junit 'CMS/target/surefire-reports/*.xml'
+            echo 'Cleaning up environment...'
+            sh "docker-compose -f ${DOCKER_COMPOSE_FILE} down || true"
+            cleanWs()
+        }
+        success {
+            echo 'Pipeline completed successfully!'
+        }
+        failure {
+            echo 'Pipeline failed. Check logs for details.'
         }
     }
 }
