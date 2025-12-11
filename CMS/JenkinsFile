@@ -2,50 +2,59 @@ pipeline {
     agent any
 
     environment {
-        MAVEN_HOME = '/usr/share/maven'   // or wherever Maven is installed
-        PATH = "${env.MAVEN_HOME}/bin:${env.PATH}"
+        // Set JAVA_HOME and MAVEN_HOME if needed
+        JAVA_HOME = 'C:\\Program Files\\Java\\jdk-25'
+        MAVEN_HOME = 'C:\\Program Files\\Apache\\apache-maven-3.9.9'
+        PATH = "${env.MAVEN_HOME}\\bin;${env.JAVA_HOME}\\bin;${env.PATH}"
     }
 
     stages {
         stage('Checkout SCM') {
             steps {
-                git branch: 'main', url: 'https://github.com/Chong0508/jenkinsTesting_1.git'
+                echo 'Cloning repository...'
+                git branch: 'main', url: 'https://github.com/Chong0508/jenkinsTesting_1.git', credentialsId: 'github-jenkinsTesting'
             }
         }
 
         stage('Pre-build Dependencies') {
             steps {
                 echo 'Downloading Maven dependencies...'
-                sh 'mvn -B dependency:go-offline'
+                bat 'mvn -B dependency:go-offline'
             }
         }
 
         stage('Build') {
             steps {
                 echo 'Building project...'
-                sh 'mvn -B clean install'
+                bat 'mvn clean install'
             }
         }
 
         stage('Unit Tests') {
             steps {
-                echo 'Running tests...'
-                sh 'mvn test'
+                echo 'Running unit tests...'
+                bat 'mvn test'
             }
         }
 
         stage('Package & Archive') {
             steps {
                 echo 'Packaging...'
-                sh 'mvn package'
-                archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
+                bat 'mvn package'
+                archiveArtifacts artifacts: 'target\\*.jar', fingerprint: true
             }
         }
     }
 
     post {
-        success { echo '✅ Build and tests succeeded!' }
-        failure { echo '❌ Build or tests failed!' }
-        always { cleanWs() }
+        success {
+            echo '✅ Build succeeded!'
+        }
+        failure {
+            echo '❌ Build failed!'
+        }
+        always {
+            cleanWs()
+        }
     }
 }
