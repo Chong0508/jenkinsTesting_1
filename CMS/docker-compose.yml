@@ -9,13 +9,13 @@ services:
       MYSQL_USER: cms_user
       MYSQL_PASSWORD: cms_pass
     ports:
-      - "3307:3306"   # Optional: only if you need to access from host
+      - "3307:3306"   # Optional for host access
     networks:
       - cms-network
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
       interval: 5s
-      retries: 5
+      retries: 10
       timeout: 5s
 
   cms-api:
@@ -29,7 +29,8 @@ services:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql-db:3306/cms_db
       SPRING_DATASOURCE_USERNAME: cms_user
       SPRING_DATASOURCE_PASSWORD: cms_pass
-    # No ports exposed to avoid host conflicts
+    # ports:
+    #   - "8081:8080"  # Only if you need host access
 
 networks:
   cms-network:
