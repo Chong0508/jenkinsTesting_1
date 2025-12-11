@@ -9,7 +9,7 @@ services:
       MYSQL_USER: cms_user
       MYSQL_PASSWORD: cms_pass
     ports:
-      - "3307:3306"   # Optional for host access
+      - "3307:3306"   # host access if needed
     networks:
       - cms-network
     healthcheck:
@@ -19,7 +19,9 @@ services:
       timeout: 5s
 
   cms-api:
-    image: cms-cms-api:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
     depends_on:
       mysql-db:
         condition: service_healthy
@@ -29,8 +31,8 @@ services:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql-db:3306/cms_db
       SPRING_DATASOURCE_USERNAME: cms_user
       SPRING_DATASOURCE_PASSWORD: cms_pass
-    # ports:
-    #   - "8081:8080"  # Only if you need host access
+    # do not expose ports to avoid conflicts in Jenkins
+    entrypoint: ["./wait-for-it.sh", "mysql-db:3306", "--", "java", "-jar", "/app.jar"]
 
 networks:
   cms-network:

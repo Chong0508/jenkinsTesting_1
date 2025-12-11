@@ -2,70 +2,35 @@ pipeline {
     agent any
 
     environment {
-        PROJECT_DIR = "CMS" // Subdirectory containing pom.xml
-        MYSQL_PORT = "3307" // Avoid conflict with local MySQL
-        APP_PORT = "8081"   // Avoid conflict with Jenkins on 8080
+        DOCKER_COMPOSE = 'docker-compose -f CMS/docker-compose.yml'
     }
 
     stages {
-
-        stage('Checkout') {
-            steps {
-                checkout scm
-                echo "Repository structure:"
-                sh "ls -R ${PROJECT_DIR}"
-            }
-        }
-
         stage('Verify Project Structure') {
             steps {
-                echo "Checking ${PROJECT_DIR}/pom.xml..."
-                sh "[ -f ${PROJECT_DIR}/pom.xml ]"
+                sh '[ -f CMS/pom.xml ]'
             }
         }
 
         stage('Build & Unit Test') {
             steps {
-                dir("${PROJECT_DIR}") {
-                    echo "Setting Maven Wrapper executable..."
-                    sh "chmod +x mvnw"
-                    echo "Building project with Maven Wrapper..."
-                    sh "./mvnw clean install -DskipTests=true"
-                    echo "Running unit tests..."
-                    sh "./mvnw test -B"
-                }
-            }
-            post {
-                always {
-                    junit "${PROJECT_DIR}/target/surefire-reports/*.xml"
+                dir('CMS') {
+                    sh './mvnw clean install -DskipTests=true'
                 }
             }
         }
 
-        stage('Setup Integration Environment') {
+        stage('Integration Environment') {
             steps {
-                echo "Starting Docker Compose environment..."
-                sh """
-                    # Adjust docker-compose ports dynamically
-                    sed -i 's/3306:3306/${MYSQL_PORT}:3306/' ${PROJECT_DIR}/docker-compose.yml
-                    sed -i 's/8080:8080/${APP_PORT}:8080/' ${PROJECT_DIR}/docker-compose.yml
-                    docker-compose -f ${PROJECT_DIR}/docker-compose.yml up -d --build
-                    echo "Waiting 20 seconds for services to become available..."
-                    sleep 20
-                """
+                sh "${DOCKER_COMPOSE} up -d"
+                // Wait for MySQL to be healthy (already handled by wait-for-it.sh)
             }
         }
 
         stage('Integration Tests') {
             steps {
-                echo "Running integration tests..."
-                dir("${PROJECT_DIR}") {
-                    sh "./mvnw verify -B"
-                }
-            }
-            post {
-                always {
-                    junit "${PROJECT_DIR}/target/failsafe-reports/*.xml"
+                dir('CMS') {
+                    sh './mvnw test'
                 }
             }
         }
@@ -73,8 +38,8 @@ pipeline {
 
     post {
         always {
-            echo "Cleaning up environment..."
-            sh "docker-compose -f ${PROJECT_DIR}/docker-compose.yml down || true"
+            echo 'Cleaning up environment...'
+            sh "${DOCKER_COMPOSE} down"
             cleanWs()
         }
     }
