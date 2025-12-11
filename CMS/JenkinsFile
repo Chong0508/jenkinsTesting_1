@@ -2,13 +2,15 @@ pipeline {
     agent any
 
     environment {
-        DOCKER_COMPOSE = "docker-compose -f CMS/docker-compose.yml"
+        DOCKER_COMPOSE_FILE = "CMS/docker-compose.yml"
     }
 
     stages {
+
         stage('Checkout') {
             steps {
-                git url: 'https://github.com/Chong0508/jenkinsTesting_1.git',
+                git branch: 'main',
+                    url: 'https://github.com/Chong0508/jenkinsTesting_1.git',
                     credentialsId: 'github-jenkinsTesting'
             }
         }
@@ -23,28 +25,33 @@ pipeline {
 
         stage('Build & Unit Test') {
             steps {
-                echo "Building project in Maven Docker container..."
-                dir('CMS') {
-                    sh 'docker run --rm -v $PWD:/app -w /app maven:3-jdk-11 ./mvnw clean install -DskipTests'
-                }
+                echo "Building project with Maven..."
+                sh 'docker run -u 0 --rm -v $PWD/CMS:/app -w /app maven:3.9.3-eclipse-temurin-11 mvn clean install -DskipTests=true'
             }
         }
 
         stage('Start Integration Environment') {
             steps {
-                echo "Starting MySQL and API..."
-                sh "${DOCKER_COMPOSE} up -d --build"
+                echo "Starting MySQL and CMS API via Docker Compose..."
+                sh "docker-compose -f $DOCKER_COMPOSE_FILE up -d --build"
                 echo "Waiting for MySQL to be healthy..."
-                sh 'sleep 20'  // adjust if necessary
+                sh '''
+                    for i in {1..30}; do
+                        if docker exec cms-db mysqladmin ping -uroot -proot --silent; then
+                            echo "MySQL is ready!"
+                            break
+                        fi
+                        echo "Waiting for MySQL..."
+                        sleep 2
+                    done
+                '''
             }
         }
 
         stage('Integration Tests') {
             steps {
-                echo "Running Integration Tests..."
-                dir('CMS') {
-                    sh './mvnw verify'
-                }
+                echo "Running integration tests..."
+                sh 'docker run -u 0 --rm -v $PWD/CMS:/app -w /app maven:3.9.3-eclipse-temurin-11 mvn test'
             }
         }
     }
@@ -52,8 +59,9 @@ pipeline {
     post {
         always {
             echo "Cleaning up Docker environment..."
-            sh "${DOCKER_COMPOSE} down"
+            sh "docker-compose -f $DOCKER_COMPOSE_FILE down"
             cleanWs()
         }
     }
 }
+
