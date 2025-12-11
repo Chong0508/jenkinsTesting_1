@@ -2,8 +2,7 @@ pipeline {
     agent any
 
     environment {
-        // Defines the subdirectory containing the pom.xml and project files.
-        PROJECT_DIR = "CMS" 
+        PROJECT_DIR = "CMS"  // Subdirectory containing pom.xml
     }
 
     stages {
@@ -11,43 +10,27 @@ pipeline {
             steps {
                 checkout scm
                 echo "Repository structure:"
-                sh "ls -R ."
+                sh "ls -R ${PROJECT_DIR}"
             }
         }
 
         stage('Verify Project Structure') {
             steps {
                 echo "Checking ${PROJECT_DIR}/pom.xml..."
-                sh "[ -f ${PROJECT_DIR}/pom.xml ]" 
-            }
-        }
-
-        stage('Initial Docker Build') {
-            steps {
-                echo "Running Maven inside Docker (skip tests)..."
-                
-                // FINAL FIX: Mount the specific project subdirectory (${WORKSPACE}/CMS) to the container root (/app).
-                // This makes the pom.xml directly available at /app/pom.xml, resolving the missing POM error.
-                sh """
-                    docker run -u 0 --rm \\
-                        -v ${WORKSPACE}/${PROJECT_DIR}:/app \\
-                        -w /app \\
-                        maven:3-jdk-11 mvn clean install -DskipTests=true
-                """
+                sh "[ -f ${PROJECT_DIR}/pom.xml ]"
             }
         }
 
         stage('Build & Unit Test') {
             steps {
-                echo "Running Maven (unit tests)..."
-                // Change directory to CMS before running Maven on the Jenkins agent.
+                echo "Building project with Maven Wrapper..."
                 dir("${PROJECT_DIR}") {
-                    sh "mvn clean test -B"
+                    sh "./mvnw clean install -DskipTests=true"
+                    sh "./mvnw test -B"
                 }
             }
             post {
                 always {
-                    // Publish test reports from the project directory.
                     junit "${PROJECT_DIR}/target/surefire-reports/*.xml"
                 }
             }
@@ -55,8 +38,7 @@ pipeline {
 
         stage('Setup Integration Environment') {
             steps {
-                echo "Starting docker-compose..."
-                // Use the -f flag with the correct path relative to the workspace root.
+                echo "Starting Docker Compose environment..."
                 sh """
                     docker-compose -f ${PROJECT_DIR}/docker-compose.yml up -d --build
                     echo "Waiting 20 seconds for services to become available..."
@@ -67,26 +49,22 @@ pipeline {
 
         stage('Integration Tests') {
             steps {
-                echo "Running Maven Failsafe (integration tests)..."
-                // Change directory to CMS before running Maven Failsafe.
+                echo "Running integration tests..."
                 dir("${PROJECT_DIR}") {
-                    sh "mvn failsafe:integration-test -B"
+                    sh "./mvnw verify -B"
                 }
             }
             post {
                 always {
-                    // Publish failsafe reports from the project directory.
                     junit "${PROJECT_DIR}/target/failsafe-reports/*.xml"
                 }
             }
         }
-    } // End of stages
+    }
 
-    // Post-Build Actions: Cleanup and Reporting
     post {
         always {
-            echo "Cleaning environment..."
-            // Use the -f flag with the correct path, and || true for robust cleanup.
+            echo "Cleaning up environment..."
             sh "docker-compose -f ${PROJECT_DIR}/docker-compose.yml down || true"
             cleanWs()
         }
