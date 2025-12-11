@@ -1,81 +1,84 @@
 pipeline {
-    agent any
+    agent {
+        docker {
+            image 'maven:3.9.5-eclipse-temurin-17'
+            args '-v $HOME/.m2:/root/.m2' // Mount Maven cache
+        }
+    }
 
     environment {
-        MAVEN_OPTS = "-Dmaven.repo.local=/var/jenkins_home/.m2/repository"
+        MAVEN_OPTS = "-Dmaven.repo.local=/root/.m2/repository"
+        PROJECT_NAME = "CMS-Backend-Pipeline"
+    }
+
+    options {
+        // Keep build logs for 30 days, max 50 builds
+        buildDiscarder(logRotator(daysToKeepStr: '30', numToKeepStr: '50'))
+        timestamps()  // add timestamps in console log
+        ansiColor('xterm')  // colorize console logs
     }
 
     stages {
-
         stage('Checkout SCM') {
             steps {
-                checkout([$class: 'GitSCM',
-                    branches: [[name: '*/main']],
-                    userRemoteConfigs: [[
-                        url: 'https://github.com/Chong0508/jenkinsTesting_1.git',
-                        credentialsId: 'github-jenkinsTesting'
-                    ]]
-                ])
+                echo "Cloning repository..."
+                git branch: 'main', url: 'https://github.com/Chong0508/jenkinsTesting_1.git'
             }
         }
 
-        stage('Verify Project Structure') {
+        stage('Pre-build Dependencies') {
             steps {
-                echo "Checking CMS/pom.xml..."
-                sh '[ -f CMS/pom.xml ] || exit 1'
-                sh 'chmod +x CMS/mvnw'
+                echo "Downloading Maven dependencies (offline mode)..."
+                sh 'mvn -B dependency:go-offline'
             }
         }
 
-        stage('Start Docker Services') {
+        stage('Build') {
             steps {
-                echo "Starting MySQL and API containers..."
-                sh 'docker-compose -f CMS/docker-compose.yml up -d --build'
-                echo "Waiting for MySQL to be ready..."
-                sh '''
-                until docker exec $(docker ps -qf "name=mysql-db") mysql -ucms_user -pcms_pass cms_db -e "SELECT 1;" &> /dev/null
-                do
-                    echo "Waiting for MySQL..."
-                    sleep 3
-                done
-                '''
+                echo "Building project..."
+                sh 'mvn -B clean install'
             }
         }
 
-        stage('Build & Unit Test') {
-    steps {
-        dir('CMS') {
-            echo "Verifying CMS directory structure..."
-            sh '''
-            echo "Current directory: $(pwd)"
-            ls -la
-            if [ ! -f pom.xml ]; then
-                echo "ERROR: pom.xml not found in $(pwd)"
-                exit 1
-            fi
-            '''
-
-            echo "Running Maven build and tests with Java 20..."
-            sh '''
-            docker run --rm \
-                -v $PWD:/app \
-                -w /app \
-                maven:3.9.3-eclipse-temurin-20 \
-                mvn clean install
-            '''
+        stage('Unit Tests') {
+            steps {
+                echo "Running tests..."
+                sh 'mvn -B test'
+            }
+            post {
+                always {
+                    junit '**/target/surefire-reports/*.xml'
+                }
+            }
         }
-    }
-}
 
+        stage('Package & Archive') {
+            steps {
+                echo "Packaging artifacts..."
+                archiveArtifacts artifacts: '**/target/*.jar', fingerprint: true
+            }
+        }
 
+        stage('Docker Build (Optional)') {
+            when {
+                expression { fileExists('Dockerfile') }
+            }
+            steps {
+                echo "Building Docker image..."
+                sh "docker build -t cms-backend:latest ."
+            }
+        }
     }
 
     post {
+        success {
+            echo "✅ Build and tests succeeded!"
+        }
+        failure {
+            echo "❌ Build or tests failed!"
+        }
         always {
-            echo "Cleaning up Docker environment..."
-            sh 'docker-compose -f CMS/docker-compose.yml down'
-            cleanWs()
+            cleanWs()  // clean workspace after build
         }
     }
 }
-
