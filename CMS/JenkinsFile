@@ -1,69 +1,55 @@
 pipeline {
-
     agent any
-
-    environment {
-        // Jenkins workspace directory
-        WORKSPACE_DIR = "${env.WORKSPACE}"
-        APP_DIR = "${env.WORKSPACE}/CMS"    // your Spring Boot project folder
-    }
 
     stages {
 
+        stage('Checkout') {
+            steps {
+                checkout scm
+                echo "Repository structure:"
+                sh "ls -R ."
+            }
+        }
+
         stage('Verify Project Structure') {
             steps {
-                echo "Checking if CMS folder contains pom.xml..."
-
-                sh '''
-                    if [ ! -f "${APP_DIR}/pom.xml" ]; then
-                        echo "ERROR: pom.xml not found in CMS folder!"
-                        echo "Expected: ${APP_DIR}/pom.xml"
-                        exit 1
-                    fi
-                '''
+                echo "Checking for pom.xml in project root..."
+                sh "[ -f pom.xml ]"
             }
         }
 
         stage('Initial Docker Build') {
             steps {
-                echo '1. Running clean install inside Maven Docker container...'
-
-                sh """
+                echo "Running Maven inside Docker..."
+                sh '''
                     docker run -u 0 --rm \
-                        -v ${APP_DIR}:/app \
+                        -v $(pwd):/app \
                         -w /app \
                         maven:3-jdk-11 mvn clean install -DskipTests=true
-                """
+                '''
             }
         }
 
         stage('Build & Unit Test') {
             steps {
-                echo '2. Compiling source code and running unit tests...'
-
-                sh """
-                    cd ${APP_DIR}
-                    mvn clean test -B
-                """
+                echo "Running Maven on Jenkins host..."
+                sh "mvn clean install -DskipTests=false -B"
+            }
+            post {
+                always {
+                    junit "target/surefire-reports/*.xml"
+                }
             }
         }
 
         stage('Setup Integration Environment') {
             steps {
-                echo '3. Starting integration environment (docker-compose)...'
-
-                sh """
-                    if [ ! -f docker-compose.yml ] && [ ! -f CMS/docker-compose.yml ]; then
-                        echo 'WARNING: docker-compose.yml not found. Skipping environment setup.'
-                        exit 0
-                    fi
-                """
-
-                sh """
-                    docker-compose -f CMS/docker-compose.yml up -d --build
-                    echo 'Waiting 30 seconds for DB & API to start...'
-                    sleep 30
-                """
+                echo "Starting docker-compose services..."
+                sh '''
+                    docker-compose up -d --build
+                    echo "Waiting for services..."
+                    sleep 20
+                '''
             }
         }
 
@@ -72,38 +58,28 @@ pipeline {
                 expression { currentBuild.result == null || currentBuild.result == 'SUCCESS' }
             }
             steps {
-                echo '4. Running integration tests...'
-
-                sh """
-                    cd ${APP_DIR}
-                    mvn failsafe:integration-test failsafe:verify -B
-                """
+                echo "Running integration tests..."
+                sh "mvn failsafe:integration-test -DskipTests=false -B"
+            }
+            post {
+                always {
+                    junit "target/failsafe-reports/*.xml"
+                }
             }
         }
     }
 
     post {
-
         always {
-            echo '5. Cleanup & Test Reporting...'
-
-            // Try shutting environment down (if docker-compose exists)
-            sh 'docker-compose -f CMS/docker-compose.yml down || true'
-
-            // Publish unit test reports safely
-            junit 'CMS/target/surefire-reports/*.xml'
-            junit 'CMS/target/failsafe-reports/*.xml'
-
+            echo "Cleaning environment..."
+            sh "docker-compose down || true"
             cleanWs()
         }
-
         success {
-            echo 'Pipeline SUCCESS!'
+            echo "PIPELINE SUCCESS!"
         }
-
         failure {
-            echo 'Pipeline FAILED — Please check logs.'
+            echo "PIPELINE FAILED!"
         }
     }
 }
-
