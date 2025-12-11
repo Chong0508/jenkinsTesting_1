@@ -25,6 +25,9 @@ pipeline {
             steps {
                 echo "Building project with Maven Wrapper..."
                 dir("${PROJECT_DIR}") {
+                    // Ensure Maven Wrapper is executable
+                    sh "chmod +x mvnw"
+                    
                     sh "./mvnw clean install -DskipTests=true"
                     sh "./mvnw test -B"
                 }
@@ -51,6 +54,9 @@ pipeline {
             steps {
                 echo "Running integration tests..."
                 dir("${PROJECT_DIR}") {
+                    // Ensure Maven Wrapper is executable here as well
+                    sh "chmod +x mvnw"
+                    
                     sh "./mvnw verify -B"
                 }
             }
