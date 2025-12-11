@@ -18,21 +18,20 @@ pipeline {
         stage('Verify Project Structure') {
             steps {
                 echo "Checking ${PROJECT_DIR}/pom.xml..."
-                // Verify the file exists at the expected path
                 sh "[ -f ${PROJECT_DIR}/pom.xml ]" 
             }
         }
 
         stage('Initial Docker Build') {
             steps {
-                echo "Running Maven inside Docker..."
+                echo "Running Maven inside Docker (skip tests)..."
                 
-                // CRITICAL FINAL FIX: Use Jenkins' built-in ${WORKSPACE} variable for reliable path resolution.
-                // This bypasses the issues caused by $(pwd) misinterpretation in Windows/WSL2 Docker environments.
+                // FINAL FIX: Mount the specific project subdirectory (${WORKSPACE}/CMS) to the container root (/app).
+                // This makes the pom.xml directly available at /app/pom.xml
                 sh """
                     docker run -u 0 --rm \\
-                        -v ${WORKSPACE}:/app \\
-                        -w /app/${PROJECT_DIR} \\
+                        -v ${WORKSPACE}/${PROJECT_DIR}:/app \\
+                        -w /app \\
                         maven:3-jdk-11 mvn clean install -DskipTests=true
                 """
             }
