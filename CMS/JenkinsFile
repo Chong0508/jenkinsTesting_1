@@ -1,26 +1,27 @@
 // Jenkins Declarative Pipeline for CMS Spring Boot Application
 
 pipeline {
-    // 1. Environment: Use any available Jenkins node/executor
+    // Agent is set to 'any' to run on the main Jenkins executor.
     agent any
 
     stages {
-        // Stage 1: Manual Docker Run (from your previous attempt)
-        // NOTE: This runs the build command on the Jenkins host, but inside a temporary container.
+        // Stage 1: Build the application using Docker-in-Shell
         stage('Initial Docker Build') {
             steps {
-                // The 'sh' step must be used to run your build inside a container manually
-                sh 'docker run --rm -v $(pwd):/app -w /app maven:3-jdk-11 mvn clean install -DskipTests=true'
+                echo '1. Running clean install inside a dedicated Maven container...'
+                
+                // CRITICAL FIX: Running the command as 'root' (-u 0) inside the Maven container 
+                // to ensure the workspace volume is mounted and written correctly, bypassing 
+                // final user permission issues between the host and container socket.
+                sh 'docker run -u 0 --rm -v $(pwd):/app -w /app maven:3-jdk-11 mvn clean install -DskipTests=true'
             }
         }
 
         // Stage 2: Build the Java application and run Unit Tests
         stage('Build & Unit Test') {
             steps {
-                echo '1. Compiling source code and running all unit tests (mvn test)...'
-                // 'clean install' packages the .jar, and '-DskipTests=false' ensures tests run
-                // NOTE: This assumes the Jenkins executor itself has Maven installed, 
-                //       or the 'agent' is configured for Maven.
+                echo '2. Compiling source code and running all unit tests (mvn test)...'
+                // Runs the build and tests on the Jenkins executor (requires Maven installation)
                 sh 'mvn clean install -DskipTests=false -B'
             }
         }
@@ -28,46 +29,53 @@ pipeline {
         // Stage 3: Deploy / Start Services for Integration Tests (Docker Compose)
         stage('Setup Integration Environment') {
             steps {
-                echo '2. Starting MySQL and Spring Boot API containers for integration testing...'
-                // Start the database (mysql-db) and API (cms-api) services in detached mode
-                sh 'docker-compose up -d --build cms-api mysql-db'
-                // Waiting for service availability
-                sh 'sleep 30' 
+                echo '3. Starting MySQL and Spring Boot API containers for integration testing...'
+                
+                // NOTE: This assumes 'docker-compose.yml' is in the root of the workspace.
+                // We use 'sh' to execute docker-compose on the Jenkins host.
+                sh '''
+                    docker-compose up -d --build cms-api mysql-db
+                    echo "Waiting 30 seconds for services to become available..."
+                    sleep 30 
+                '''
             }
         }
 
         // Stage 4: Run Full Integration/API Tests
         stage('Integration Tests') {
-            // Only proceed if the previous unit tests passed successfully
             when {
+                // Only run integration tests if the unit tests were successful
                 expression { return currentBuild.result == 'SUCCESS' }
             }
             steps {
-                echo '3. Running API/Integration Tests (using Maven Failsafe)...'
-                // Executes tests designed to hit the live API endpoints
-                sh 'mvn failsafe:integration-test -DskipTests=false -B'
+                echo '4. Running API/Integration Tests (using Maven Failsafe)...'
+                sh 'mvn failsafe:integration-test -DskipTests=false -B' 
             }
         }
-    } // <-- CORRECT CLOSING BRACE for the main 'stages' block
+    } // End of stages
 
     // Post-Build Actions: Cleanup and Reporting
     post {
         always {
-            echo '4. Cleaning up Docker containers and publishing reports...'
-            // Stop and remove the containers launched in Stage 3
-            sh 'docker-compose down'
+            echo '5. Cleaning up Docker containers and publishing reports...'
+            
+            // CRITICAL FIX: Added '|| true' to the cleanup commands.
+            // This ensures the pipeline doesn't fail here if the containers weren't properly started 
+            // (e.g., if an earlier stage failed) or if the docker-compose file isn't found 
+            // (exit code 14 error you saw). This guarantees cleanup executes regardless of errors.
+            sh 'docker-compose down || true' 
             
             // Publish test reports to Jenkins UI
             junit '**/target/surefire-reports/TEST-*.xml'
             
-            // Clean workspace to free up disk space
+            // Clean workspace
             cleanWs()
         }
         success {
-            echo 'Pipeline Success! Tests passed and Report is published.'
+            echo 'Pipeline Success! Build and Tests passed.'
         }
         failure {
             echo 'Pipeline FAILED. Check console output and Test Results for errors.'
         }
-    }
-}
+    } // End of post
+} // End of pipeline
