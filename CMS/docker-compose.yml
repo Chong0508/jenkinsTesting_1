@@ -1,34 +1,37 @@
-version: '3.8'
+version: "3.9"
 
 services:
   mysql-db:
-    image: mysql:8.1
-    container_name: mysql-db
+    image: mysql:8.0
     environment:
-      MYSQL_ROOT_PASSWORD: Conferease123!
-      MYSQL_DATABASE: cmsdb
-      MYSQL_USER: conferEase
-      MYSQL_PASSWORD: Conferease123!
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: cms_db
+      MYSQL_USER: cms_user
+      MYSQL_PASSWORD: cms_pass
     ports:
-      - "3307:3306"
-    volumes:
-      - mysql-data:/var/lib/mysql
-      - ./sql/cms_create.sql:/docker-entrypoint-initdb.d/cms_create.sql
-      - ./sql/cms_data.sql:/docker-entrypoint-initdb.d/cms_data.sql
+      - "3307:3306"  # optional, for host access
+    networks:
+      - cms-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 5s
+      retries: 10
+      timeout: 5s
 
   cms-api:
-    build: .
-    container_name: cms-api
+    build:
+      context: .
+      dockerfile: Dockerfile
     depends_on:
-      - mysql-db
+      mysql-db:
+        condition: service_healthy
+    networks:
+      - cms-network
     environment:
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql-db:3306/cmsdb
-      SPRING_DATASOURCE_USERNAME: conferEase
-      SPRING_DATASOURCE_PASSWORD: Conferease123!
-      SPRING_JPA_HIBERNATE_DDL_AUTO: update
-      SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT: org.hibernate.dialect.MySQL8Dialect
-    ports:
-      - "8080:8080"
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql-db:3306/cms_db
+      SPRING_DATASOURCE_USERNAME: cms_user
+      SPRING_DATASOURCE_PASSWORD: cms_pass
 
-volumes:
-  mysql-data:
+networks:
+  cms-network:
+    driver: bridge
