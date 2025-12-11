@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  mysql-db:
+    image: mysql:8.1
+    container_name: mysql-db
+    environment:
+      MYSQL_ROOT_PASSWORD: Conferease123!
+      MYSQL_DATABASE: cmsdb
+      MYSQL_USER: conferEase
+      MYSQL_PASSWORD: Conferease123!
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./sql/cms_create.sql:/docker-entrypoint-initdb.d/cms_create.sql
+      - ./sql/cms_data.sql:/docker-entrypoint-initdb.d/cms_data.sql
+
+  cms-api:
+    build: .
+    container_name: cms-api
+    depends_on:
+      - mysql-db
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql-db:3306/cmsdb
+      SPRING_DATASOURCE_USERNAME: conferEase
+      SPRING_DATASOURCE_PASSWORD: Conferease123!
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+      SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT: org.hibernate.dialect.MySQL8Dialect
+    ports:
+      - "8080:8080"
+
+volumes:
+  mysql-data:

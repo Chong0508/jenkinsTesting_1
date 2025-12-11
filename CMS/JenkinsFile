@@ -1,0 +1,73 @@
+// Jenkins Declarative Pipeline for CMS Spring Boot Application
+
+pipeline {
+    // 1. Environment: Use a Maven image to ensure a consistent build environment.
+    agent {
+        docker {
+            // Using a standard Java/Maven image to run mvn commands
+            image 'maven:3.9.6-eclipse-temurin-20'
+            // Cache Maven dependencies to speed up subsequent builds
+            args '-v $HOME/.m2:/root/.m2'
+        }
+    }
+    
+    stages {
+        
+        // Stage 1: Build the Java application and run Unit Tests (including your new controller test)
+        stage('Build & Unit Test') {
+            steps {
+                echo '1. Compiling source code and running all unit tests (mvn test)...'
+                // 'clean install' packages the .jar, and '-DskipTests=false' ensures tests run
+                sh 'mvn clean install -DskipTests=false -B' 
+            }
+        }
+        
+        // Stage 2: Deploy / Start Services for Integration Tests (This uses Docker Compose)
+        stage('Setup Integration Environment') {
+            steps {
+                echo '2. Starting MySQL and Spring Boot API containers for integration testing...'
+                // Start the database (mysql-db) and API (cms-api) services in detached mode
+                // NOTE: This requires Jenkins to have access to Docker/docker-compose on the host machine.
+                script {
+                    sh 'docker-compose up -d --build cms-api mysql-db' //
+                    // Waiting for service availability (adjust sleep or use a proper health check script)
+                    sh 'sleep 30' 
+                }
+            }
+        }
+
+        // Stage 3: Run Full Integration/API Tests
+        stage('Integration Tests') {
+            // Only proceed if the previous unit tests passed successfully
+            when {
+                expression { return currentBuild.result == 'SUCCESS' }
+            }
+            steps {
+                echo '3. Running API/Integration Tests (assuming tests are configured to use Maven Failsafe)...'
+                // This command executes tests designed to hit the live API endpoints on localhost:8080
+                sh 'mvn failsafe:integration-test -DskipTests=false -B' 
+            }
+        }
+    }
+    
+    // Post-Build Actions: Cleanup and Reporting
+    post {
+        always {
+            echo '4. Cleaning up Docker containers and publishing reports...'
+            // Stop and remove the containers launched in Stage 2
+            sh 'docker-compose down'
+            
+            // Publish test reports to Jenkins UI (must match the Maven output directory)
+            junit '**/target/surefire-reports/TEST-*.xml'
+            
+            // Clean workspace to free up disk space
+            cleanWs()
+        }
+        success {
+            echo 'Pipeline Success! Tests passed and Report is published.'
+        }
+        failure {
+            echo 'Pipeline FAILED. Check console output and Test Results for errors.'
+        }
+    }
+}
