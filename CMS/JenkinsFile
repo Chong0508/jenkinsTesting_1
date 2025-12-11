@@ -2,34 +2,33 @@ pipeline {
     agent any
 
     environment {
-        PROJECT_DIR = "CMS"  // Subdirectory containing pom.xml
+        PROJECT_DIR = "CMS"
     }
 
     stages {
         stage('Checkout') {
             steps {
                 checkout scm
-                echo "Repository structure:"
                 sh "ls -R ${PROJECT_DIR}"
             }
         }
 
-        stage('Verify Project Structure') {
+        stage('Setup Integration Environment') {
             steps {
-                echo "Checking ${PROJECT_DIR}/pom.xml..."
-                sh "[ -f ${PROJECT_DIR}/pom.xml ]"
+                echo "Starting Docker Compose environment..."
+                sh """
+                    docker-compose -f ${PROJECT_DIR}/docker-compose.yml up -d --build
+                    echo "Waiting 20 seconds for MySQL to be ready..."
+                    sleep 20
+                """
             }
         }
 
         stage('Build & Unit Test') {
             steps {
-                echo "Building project with Maven Wrapper..."
                 dir("${PROJECT_DIR}") {
-                    // Ensure Maven Wrapper is executable
                     sh "chmod +x mvnw"
-                    
-                    sh "./mvnw clean install -DskipTests=true"
-                    sh "./mvnw test -B"
+                    sh "./mvnw clean install -DskipTests=false -B"
                 }
             }
             post {
@@ -39,24 +38,9 @@ pipeline {
             }
         }
 
-        stage('Setup Integration Environment') {
-            steps {
-                echo "Starting Docker Compose environment..."
-                sh """
-                    docker-compose -f ${PROJECT_DIR}/docker-compose.yml up -d --build
-                    echo "Waiting 20 seconds for services to become available..."
-                    sleep 20
-                """
-            }
-        }
-
         stage('Integration Tests') {
             steps {
-                echo "Running integration tests..."
                 dir("${PROJECT_DIR}") {
-                    // Ensure Maven Wrapper is executable here as well
-                    sh "chmod +x mvnw"
-                    
                     sh "./mvnw verify -B"
                 }
             }
