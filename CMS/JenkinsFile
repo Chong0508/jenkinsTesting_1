@@ -1,56 +1,91 @@
 pipeline {
     agent any
 
+    environment {
+        // Defines the subdirectory containing the pom.xml and project files
+        PROJECT_DIR = "CMS"
+    }
+
     stages {
-        stage('Checkout SCM') {
+        stage('Checkout') {
             steps {
                 checkout scm
+                echo "Repository structure:"
+                sh "ls -R ."
             }
         }
 
         stage('Verify Project Structure') {
             steps {
-                echo 'Checking CMS/pom.xml...'
-                sh '[ -f CMS/pom.xml ] || echo "pom.xml not found!"'
+                echo "Checking ${PROJECT_DIR}/pom.xml..."
+                sh "[ -f ${PROJECT_DIR}/pom.xml ] || { echo 'pom.xml not found!'; exit 1; }"
             }
         }
 
         stage('Initial Docker Build') {
             steps {
-                echo 'Running Maven inside Docker...'
-
-                // Option 1: Use -f to explicitly point to pom.xml
+                echo "Running Maven inside Docker (skip tests)..."
+                // Mount entire workspace and set working directory to where pom.xml is
                 sh '''
                     docker run -u 0 --rm \
-                    -v $PWD:/app \
-                    -w /app \
-                    maven:3-jdk-11 \
-                    mvn -f CMS/pom.xml clean install -DskipTests=true
+                        -v "$(pwd)":/app \
+                        -w /app/${PROJECT_DIR} \
+                        maven:3-jdk-11 \
+                        mvn clean install -DskipTests=true
                 '''
-
-                // Option 2: Mount CMS directly (uncomment if preferred)
-                // sh '''
-                //     docker run -u 0 --rm \
-                //     -v $PWD/CMS:/app \
-                //     -w /app \
-                //     maven:3-jdk-11 \
-                //     mvn clean install -DskipTests=true
-                // '''
             }
         }
 
         stage('Build & Unit Test') {
             steps {
-                echo 'Build & Unit Test stage will run if Initial Docker Build succeeds.'
-                // Add your actual unit test commands here
+                echo "Running Maven unit tests..."
+                dir("${PROJECT_DIR}") {
+                    sh "mvn clean test -B"
+                }
+            }
+            post {
+                always {
+                    junit "${PROJECT_DIR}/target/surefire-reports/*.xml"
+                }
+            }
+        }
+
+        stage('Setup Integration Environment') {
+            steps {
+                echo "Starting docker-compose services..."
+                script {
+                    // Retry in case services take longer to start
+                    retry(2) {
+                        sh """
+                            docker-compose -f ${PROJECT_DIR}/docker-compose.yml up -d --build
+                        """
+                    }
+                    echo "Waiting 20 seconds for services to become ready..."
+                    sleep 20
+                }
+            }
+        }
+
+        stage('Integration Tests') {
+            steps {
+                echo "Running Maven integration tests (Failsafe)..."
+                dir("${PROJECT_DIR}") {
+                    sh "mvn failsafe:integration-test -B"
+                }
+            }
+            post {
+                always {
+                    junit "${PROJECT_DIR}/target/failsafe-reports/*.xml"
+                }
             }
         }
     }
 
     post {
         always {
-            echo 'Cleaning environment...'
-            sh 'docker-compose -f CMS/docker-compose.yml down || true'
+            echo "Cleaning up environment..."
+            // Ensure docker-compose down does not fail the pipeline
+            sh "docker-compose -f ${PROJECT_DIR}/docker-compose.yml down || true"
             cleanWs()
         }
     }
