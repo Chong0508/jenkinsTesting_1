@@ -25,22 +25,22 @@ pipeline {
         stage('Initial Docker Build') {
             steps {
                 echo "Running Maven inside Docker..."
-                // CRITICAL FIX: The mount path must be corrected.
-                // The volume mount should map the entire Jenkins workspace root (which contains the CMS folder) 
-                // and the working directory (-w) should point to the /app/CMS folder inside the container.
-                sh """
-                    docker run -u 0 --rm \\
-                        -v \$(pwd):/app \\
-                        -w /app/${PROJECT_DIR} \\
+                // CRITICAL FIX: Mount the whole workspace (\$(pwd):/app) and set 
+                // the working directory (-w) to /app/CMS where pom.xml is located.
+                // Running as root (-u 0) is necessary to bypass final Docker socket permission conflicts.
+                sh '''
+                    docker run -u 0 --rm \
+                        -v "$(pwd)":/app \
+                        -w /app/CMS \
                         maven:3-jdk-11 mvn clean install -DskipTests=true
-                """
+                '''
             }
         }
 
         stage('Build & Unit Test') {
             steps {
                 echo "Running Maven (unit tests)..."
-                // The dir() block correctly navigates to the CMS directory.
+                // The dir() block correctly navigates to the CMS directory on the Jenkins agent.
                 dir("${PROJECT_DIR}") {
                     sh "mvn clean test -B"
                 }
@@ -82,6 +82,7 @@ pipeline {
         }
     } // End of stages
 
+    // Post-Build Actions: Cleanup and Reporting
     post {
         always {
             echo "Cleaning environment..."
