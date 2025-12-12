@@ -19,7 +19,7 @@ public class Conference {
     @Column(name = "Acronym", nullable = false, length = 50)
     private String acronym;
 
-    @Column(name = "Year", nullable = false)
+    @Column(name = "`Year`", nullable = false)
     private Integer year;
 
     @Column(name = "Start_date", nullable = false)

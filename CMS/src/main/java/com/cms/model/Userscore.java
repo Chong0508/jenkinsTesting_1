@@ -23,7 +23,7 @@ public class Userscore {
     @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
     private Badge badgeID;
 
-    @Column(nullable = false)
+    @Column(name = "`value`", nullable = false)
     private int value;
 
     public UserscoreId getId() {
