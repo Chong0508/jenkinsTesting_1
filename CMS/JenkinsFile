@@ -2,11 +2,19 @@ pipeline {
     agent any
 
     environment {
-        // Defines the subdirectory containing the pom.xml and project files.
         PROJECT_DIR = "CMS" 
     }
 
     stages {
+        stage('Fix Docker Permissions') {
+            steps {
+                script {
+                    // Fix Docker socket permissions at the start of each build
+                    sh 'chmod 666 /var/run/docker.sock || true'
+                }
+            }
+        }
+
         stage('Checkout') {
             steps {
                 checkout scm
@@ -19,20 +27,15 @@ pipeline {
             steps {
                 echo "Checking ${PROJECT_DIR}/pom.xml..."
                 sh "[ -f ${PROJECT_DIR}/pom.xml ]" 
-                
-                // FIX 1: Grant execute permission to the mvnw script (fixes 'Permission denied')
                 sh "chmod +x ${PROJECT_DIR}/mvnw" 
             }
         }
 
-        // This stage performs the full build, package, and unit test execution.
         stage('Build, Unit Test & Package') {
             steps {
                 echo "1. Running full Maven build and Unit Tests with H2 in-memory database..."
                 
                 dir("${PROJECT_DIR}") {
-                    // CRITICAL FINAL FIX: Overriding URL, Driver Class Name, and Dialect for H2.
-                    // This resolves the 'Driver claims to not accept jdbcUrl' error.
                     sh """
                         ./mvnw clean install -B \\
                             -Dspring.datasource.url=jdbc:h2:mem:testdb \\
@@ -45,7 +48,6 @@ pipeline {
             }
             post {
                 always {
-                    // Publish test reports from the project directory.
                     junit "${PROJECT_DIR}/target/surefire-reports/*.xml"
                 }
             }
@@ -56,7 +58,6 @@ pipeline {
                 echo "2. Starting Integration environment (docker-compose)..."
                 
                 dir("${PROJECT_DIR}") {
-                    // FIX: Starting the correct service names (mysql-db cms-api)
                     sh """
                         docker-compose up -d mysql-db cms-api --build
                         echo "Waiting 20 seconds for services to become available..."
@@ -69,7 +70,6 @@ pipeline {
         stage('Integration Tests') {
             steps {
                 echo "3. Running Maven Failsafe (integration tests) against live DB..."
-                // Runs integration tests against the live database started in the previous stage.
                 dir("${PROJECT_DIR}") {
                     sh "mvn failsafe:integration-test -B"
                 }
@@ -80,17 +80,11 @@ pipeline {
                 }
             }
         }
-    } // End of stages
+    }
 
-    // Post-Build Actions: Cleanup and Reporting
     post {
         always {
             echo "4. Cleaning environment..."
-            
-            // CRITICAL CLEANUP FIX: Re-run chmod 666 to regain Docker socket permission for cleanup.
-            sh "docker exec -u 0 jenkins_server sh -c 'chmod 666 /var/run/docker.sock' || true"
-            
-            // Use the -f flag with the correct path, and || true for robust cleanup.
             sh "docker-compose -f ${PROJECT_DIR}/docker-compose.yml down || true"
             cleanWs()
         }
