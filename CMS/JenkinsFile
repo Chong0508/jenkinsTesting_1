@@ -2,64 +2,92 @@ pipeline {
     agent any
 
     environment {
-        // Add Maven and Java to PATH if installed globally
-        PATH = "${env.PATH}"
+        // Defines the subdirectory containing the pom.xml and project files.
+        PROJECT_DIR = "CMS" 
     }
 
     stages {
-        stage('Checkout SCM') {
+        stage('Checkout') {
             steps {
-                echo 'Cloning repository...'
-                git branch: 'main', url: 'https://github.com/Chong0508/jenkinsTesting_1.git', credentialsId: 'github-jenkinsTesting'
+                checkout scm
+                echo "Repository structure:"
+                sh "ls -R ."
             }
         }
 
-        stage('Check Maven & Java') {
+        stage('Verify Project Structure') {
             steps {
-                echo 'Checking Maven and Java installation...'
-                bat 'mvn -version'
-                bat 'java -version'
+                echo "Checking ${PROJECT_DIR}/pom.xml..."
+                sh "[ -f ${PROJECT_DIR}/pom.xml ]" 
+                
+                // FIX 1: Grant execute permission to the mvnw script (fixes 'Permission denied')
+                sh "chmod +x ${PROJECT_DIR}/mvnw" 
             }
         }
 
-        stage('Pre-build Dependencies') {
+        // This stage combines the build, package, and unit test execution into a single robust step.
+        stage('Build, Unit Test & Package') {
             steps {
-                echo 'Downloading Maven dependencies...'
-                bat 'mvn -B dependency:go-offline'
+                echo "1. Running full Maven build and Unit Tests with H2 in-memory database..."
+                
+                dir("${PROJECT_DIR}") {
+                    // CRITICAL FINAL FIX: Overriding URL, Driver Class Name, and Dialect for H2.
+                    // This resolves the 'Driver claims to not accept jdbcUrl' error.
+                    sh """
+                        ./mvnw clean install -B \\
+                            -Dspring.datasource.url=jdbc:h2:mem:testdb \\
+                            -Dspring.datasource.driver-class-name=org.h2.Driver \\
+                            -Dspring.datasource.username=sa \\
+                            -Dspring.datasource.password= \\
+                            -Dspring.jpa.properties.hibernate.dialect=org.hibernate.dialect.H2Dialect
+                    """
+                }
+            }
+            post {
+                always {
+                    // Publish test reports from the project directory.
+                    junit "${PROJECT_DIR}/target/surefire-reports/*.xml"
+                }
             }
         }
 
-        stage('Build') {
+        stage('Setup Integration Environment') {
             steps {
-                echo 'Building project...'
-                bat 'mvn clean install'
+                echo "2. Starting Integration environment (docker-compose)..."
+                
+                dir("${PROJECT_DIR}") {
+                    // FIX: Starting the correct service names (mysql-db cms-api)
+                    sh """
+                        docker-compose up -d mysql-db cms-api --build
+                        echo "Waiting 20 seconds for services to become available..."
+                        sleep 20
+                    """
+                }
             }
         }
 
-        stage('Unit Tests') {
+        stage('Integration Tests') {
             steps {
-                echo 'Running unit tests...'
-                bat 'mvn test'
+                echo "3. Running Maven Failsafe (integration tests) against live DB..."
+                // Runs integration tests against the live database started in the previous stage.
+                dir("${PROJECT_DIR}") {
+                    sh "mvn failsafe:integration-test -B"
+                }
+            }
+            post {
+                always {
+                    junit "${PROJECT_DIR}/target/failsafe-reports/*.xml"
+                }
             }
         }
+    } // End of stages
 
-        stage('Package & Archive') {
-            steps {
-                echo 'Packaging...'
-                bat 'mvn package'
-                archiveArtifacts artifacts: 'target\\*.jar', fingerprint: true
-            }
-        }
-    }
-
+    // Post-Build Actions: Cleanup and Reporting
     post {
-        success {
-            echo '✅ Build succeeded!'
-        }
-        failure {
-            echo '❌ Build failed!'
-        }
         always {
+            echo "4. Cleaning environment..."
+            // Use the -f flag with the correct path, and || true for robust cleanup.
+            sh "docker-compose -f ${PROJECT_DIR}/docker-compose.yml down || true"
             cleanWs()
         }
     }
