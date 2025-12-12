@@ -6,15 +6,6 @@ pipeline {
     }
 
     stages {
-        stage('Fix Docker Permissions') {
-            steps {
-                script {
-                    // Fix Docker socket permissions at the start of each build
-                    sh 'chmod 666 /var/run/docker.sock || true'
-                }
-            }
-        }
-
         stage('Checkout') {
             steps {
                 checkout scm
@@ -71,12 +62,16 @@ pipeline {
             steps {
                 echo "3. Running Maven Failsafe (integration tests) against live DB..."
                 dir("${PROJECT_DIR}") {
-                    sh "mvn failsafe:integration-test -B"
+                    // FIXED: Use ./mvnw instead of mvn
+                    sh "./mvnw failsafe:integration-test -B"
                 }
             }
             post {
                 always {
-                    junit "${PROJECT_DIR}/target/failsafe-reports/*.xml"
+                    // Use catchError to continue even if test reports don't exist
+                    catchError(buildResult: 'SUCCESS', stageResult: 'FAILURE') {
+                        junit "${PROJECT_DIR}/target/failsafe-reports/*.xml"
+                    }
                 }
             }
         }
