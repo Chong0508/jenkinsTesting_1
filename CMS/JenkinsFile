@@ -25,7 +25,7 @@ pipeline {
             }
         }
 
-        // This stage combines the build, package, and unit test execution into a single robust step.
+        // This stage performs the full build, package, and unit test execution.
         stage('Build, Unit Test & Package') {
             steps {
                 echo "1. Running full Maven build and Unit Tests with H2 in-memory database..."
@@ -86,6 +86,10 @@ pipeline {
     post {
         always {
             echo "4. Cleaning environment..."
+            
+            // CRITICAL CLEANUP FIX: Re-run chmod 666 to regain Docker socket permission for cleanup.
+            sh "docker exec -u 0 jenkins_server sh -c 'chmod 666 /var/run/docker.sock' || true"
+            
             // Use the -f flag with the correct path, and || true for robust cleanup.
             sh "docker-compose -f ${PROJECT_DIR}/docker-compose.yml down || true"
             cleanWs()
